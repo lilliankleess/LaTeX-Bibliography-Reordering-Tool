@@ -1,0 +1,150 @@
+import pandas as pd
+import re
+from io import BytesIO
+from IPython.display import display
+from ipywidgets import FileUpload
+import os
+
+def extract_bibitems(tex_content):
+    """
+    Extract all \bibitem entries from LaTeX content.
+
+    Args:
+        tex_content (str): Content of the .tex file.
+
+    Returns:
+        dict: A dictionary mapping \bibitem labels to their entries.
+    """
+    bibitems = {}
+    current_item = []
+    current_label = None
+
+    lines = tex_content.splitlines()
+
+    for line in lines:
+        # Detect start of a new \bibitem entry
+        if line.strip().startswith("\\bibitem"):
+            # Process the previous entry
+            if current_label and current_item:
+                item_str = "\n".join(current_item)
+                bibitems[current_label] = item_str
+            
+            # Reset for the new entry
+            current_item = [line]
+            current_label = None
+
+            # Extract the label from \bibitem{label}
+            match = re.match(r"\\bibitem\{([^\}]+)\}", line.strip())
+            if match:
+                current_label = match.group(1)
+        else:
+            current_item.append(line)
+
+    # Add the last entry (if any)
+    if current_label and current_item:
+        item_str = "\n".join(current_item)
+        bibitems[current_label] = item_str
+
+    return bibitems
+
+
+def reorder_bibitems(bibitems, order_list):
+    """
+    Reorder \bibitem entries based on the provided order.
+
+    Args:
+        bibitems (dict): Dictionary of \bibitem entries with their labels.
+        order_list (list): List of labels in the desired order.
+
+    Returns:
+        str: Reordered LaTeX content containing \bibitem entries.
+    """
+    reordered_content = ""
+
+    for label in order_list:
+        if label in bibitems:
+            reordered_content += bibitems[label] + "\n\n"
+
+    return reordered_content
+
+
+def save_to_tex(reordered_content, output_path):
+    """
+    Save reordered \bibitem content to a new .tex file.
+
+    Args:
+        reordered_content (str): Reordered LaTeX content.
+        output_path (str): Path to save the new .tex file.
+    """
+    try:
+        with open(output_path, 'w', encoding='utf-8') as tex_file:
+            tex_file.write(reordered_content)
+        print(f"Reordered .tex file saved to: {output_path}")
+    except Exception as e:
+        print(f"Error saving the .tex file: {e}")
+
+
+def process_files(excel_file, tex_file):
+    """
+    Process Excel and .tex files to reorder \bibitem entries.
+
+    Args:
+        excel_file (dict): Uploaded Excel file with content and metadata.
+        tex_file (dict): Uploaded LaTeX file with content and metadata.
+    """
+    try:
+        # Load Excel file into a DataFrame
+        excel_content = excel_file['content']
+        excel_bytes = BytesIO(excel_content)
+        df = pd.read_excel(excel_bytes)
+
+        # Validate the structure of the Excel file
+        if df.shape[1] < 2:
+            raise ValueError("Excel file must have at least two columns.")
+
+        # Extract the second column (authorlastnameyear) for ordering
+        order_list = df.iloc[:, 1].astype(str).tolist()
+
+        # Decode the .tex content to string
+        tex_content = bytes(tex_file['content']).decode('utf-8', errors='replace')
+
+        # Extract \bibitem entries from the .tex file
+        bibitems = extract_bibitems(tex_content)
+
+        # Reorder \bibitem entries based on the Excel list
+        reordered_content = reorder_bibitems(bibitems, order_list)
+
+        # Prepare output file name
+        tex_file_name = tex_file['name']
+        output_path = os.path.splitext(tex_file_name)[0] + "_reordered.tex"
+
+        # Save reordered content to a new .tex file
+        save_to_tex(reordered_content, output_path)
+    except Exception as e:
+        print(f"An error occurred while processing files: {e}")
+
+
+# Use ipywidgets for file upload
+excel_upload = FileUpload(accept='.xlsx', multiple=False)
+tex_upload = FileUpload(accept='.tex', multiple=False)
+
+def handle_upload(change):
+    # Ensure both files are uploaded
+    if excel_upload.value and tex_upload.value:
+        # Access the uploaded files directly
+        excel_file = excel_upload.value[0]
+        tex_file = tex_upload.value[0]
+
+        print(f"Processing files: {excel_file['name']} and {tex_file['name']}")
+        process_files(excel_file, tex_file)
+    else:
+        print("Please upload both the Excel file and the .tex file.")
+
+# Display widgets for file uploads
+display(excel_upload)
+display(tex_upload)
+
+# Bind the upload widgets to the handler
+excel_upload.observe(handle_upload, names='value')
+tex_upload.observe(handle_upload, names='value')
+
